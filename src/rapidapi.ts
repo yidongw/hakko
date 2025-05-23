@@ -33,15 +33,45 @@ export interface TweetDetailV3NoteTweet {
 export interface TweetDetailV3User {
   __typename: string
   rest_id: string
-  core?: {
-    created_at?: string
-    name?: string
-    screen_name?: string
+  core: {
+    created_at: string
+    name: string
+    screen_name: string
   }
-  name?: string
-  screen_name?: string
-  avatar?: {
+  avatar: {
     image_url: string
+  }
+  banner: {
+    image_url: string
+  }
+  location: {
+    location: string
+  }
+  profile_bio: {
+    description: string
+    entities: {
+      url?: {
+        urls: {
+          display_url: string
+          expanded_url: string
+          url: string
+        }[]
+      }
+    }
+  }
+  relationship_counts: {
+    followers: number
+    following: number
+  }
+  tweet_counts: {
+    tweets: number
+    media_tweets: number
+  }
+  action_counts: {
+    favorites_count: number
+  }
+  website: {
+    url: string
   }
   legacy?: {
     profile_image_url_https?: string
@@ -60,9 +90,7 @@ export interface TweetDetailV3Legacy {
   display_text_range?: number[]
   entities: {
     hashtags?: any[]
-    media?: TweetDetailV3Media[]
     symbols?: any[]
-    timestamps?: any[]
     urls?: TweetUrl[]
     user_mentions?: TweetUserMention[]
   }
@@ -98,12 +126,40 @@ export interface TweetDetailV3Legacy {
 export interface TweetDetailV3Media {
   display_url: string
   expanded_url: string
-  id_str: string
-  indices: number[]
+  id_str: string // needed in db
+  indices: number[] 
   media_key: string
-  media_url_https: string
-  type: string
-  url: string
+  media_url_https: string // needed in db
+  original_info: {
+    focus_rects: {
+      h: number
+      w: number
+      x: number
+      y: number
+    }[]
+    height: number
+    width: number
+  }
+  sizes: { // needed in db
+    large: {
+      h: number
+      w: number
+    }
+  }
+  type: string // video, photo, animated_gif // needed in db
+  video_info: { // needed in db
+    aspect_ratio: number[]
+    duration_millis: number
+    variants: {
+      bitrate?: number
+      content_type: string
+      url: string
+    }[]
+  }
+  inline_media?: { // needed in db
+    index: number
+    media_id: string
+  }[]
 }
 
 
@@ -173,24 +229,13 @@ interface TwitterUser {
   mediaCount: number;
   profileImageUrlHttps: string;
   profileBannerUrl: string;
-  isKol: boolean;
-  kolFollowersCount: number;
-  tags: string[];
-  lastTweetId: string;
-  updatedAt: Date;
   website: string;
-  foundAt: Date;
-  kolInfoUpdatedAt: Date | null;
-  deletedAt: Date | null;
-  protectedAt: Date | null;
 }
 
 interface NewTweet {
   id: string;
   userId: string;
-  mediaType: string;
   text: string;
-  processedText: string;
   medias: any | null;
   isReply: boolean;
   relatedTweetId: string;
@@ -224,7 +269,7 @@ function transformTwitterResponse(twitterData: any): EnhancedTweet[] {
       continue
     }
 
-    const tweet = isTweetWithVisibilityResults(tweetResult) ? tweetResult.tweet : tweetResult
+    const tweet: TweetDetailV3Tweet = isTweetWithVisibilityResults(tweetResult) ? tweetResult.tweet : tweetResult
 
     if (!tweet.legacy) {
       logger().info(
@@ -237,26 +282,12 @@ function transformTwitterResponse(twitterData: any): EnhancedTweet[] {
     const legacy = tweet.legacy
     const user = tweet.core?.user_results?.result
     const view_count = Number(tweet.view_count_info?.count || '0')
-
-    // Replace URLs in text with expanded versions and extract CA
-    let processedText = legacy.full_text
-
-    if (legacy.entities?.urls?.length > 0) {
-      legacy.entities.urls.forEach((urlEntity: any) => {
-        // Replace shortened URL with expanded version
-        processedText = processedText.replace(urlEntity.url, urlEntity.expanded_url)
-      })
-    }
-
-    const now = new Date()
-
+    
     tweets.push({
       id: tweet.rest_id,
       userId: legacy.user_id_str,
-      mediaType: '', // Need to extract from entities if needed
       text: legacy.full_text,
-      processedText,
-      medias: null, // Need to extract from entities if needed
+      medias: legacy.extended_entities?.media?.map(item => item.media_url_https), // Need to extract from entities if needed
       isReply: !!legacy.in_reply_to_status_id_str,
       relatedTweetId: legacy.in_reply_to_status_id_str || '',
       favoriteCount: legacy.favorite_count,
@@ -282,16 +313,7 @@ function transformTwitterResponse(twitterData: any): EnhancedTweet[] {
         mediaCount: user.tweet_counts?.media_tweets || 0,
         profileImageUrlHttps: user.avatar?.image_url || '',
         profileBannerUrl: user.banner?.image_url || '',
-        isKol: false,
-        kolFollowersCount: 0,
-        tags: [],
-        lastTweetId: '',
-        updatedAt: now,
         website: user.profile_bio?.entities?.url?.urls[0]?.expanded_url || '',
-        foundAt: now,
-        kolInfoUpdatedAt: null,
-        deletedAt: null,
-        protectedAt: null
       }
     })
   }
@@ -334,23 +356,6 @@ export async function getTwitterSearch(
     }
   )
   const data = transformTwitterResponse(response)
-
-  // do a sanity check, make sure that ca is in the text of the tweets
-  // if not, throw an error and try again
-  if (
-    data.length > 0 &&
-    !data.some((tweet) =>
-      queries.some((query) => {
-        // Skip queries shorter than 20 characters
-        if (query.length < 20) {
-          return true
-        }
-        return tweet.processedText.toLowerCase().includes(query.toLowerCase())
-      })
-    )
-  ) {
-    throw new Error('None of the query terms found in the tweets')
-  }
 
   return data
 }

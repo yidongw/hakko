@@ -5,6 +5,7 @@ const configSchema = v.object({
   env: v.string(),
   logLevel: v.string(),
   rapidapiKey: v.string(),
+  imgbbKey: v.string(),
 })
 
 export type Config = v.InferOutput<typeof configSchema>

@@ -1,5 +1,7 @@
 import { getTwitterSearch } from '@/rapidapi'
 import { logger } from '@/utils/logger'
+import { extractTickerAndName } from './utils/validation'
+import { generateTweetImageAndUpload, tweetToImage } from './tweetToImage'
 
 interface SearchConfigState {
   query: string
@@ -70,8 +72,28 @@ export async function pollForNewTweets() {
   while (true) {
     try {
       const tweets = await searchLatestTweets('launchcoin')
-      console.log(tweets)
       
+      const coinsTweets = tweets.map(tweet => ({
+        ...tweet,
+        coin: extractTickerAndName(tweet.text)
+      })).filter(tweet => tweet.coin.ticker !== '')
+      
+      for (const coinTweet of coinsTweets) {
+        const { ticker, name, description } = coinTweet.coin
+        let imageUrl = coinTweet.medias?.[0]
+
+        if (!imageUrl) {
+          imageUrl = await generateTweetImageAndUpload(coinTweet)
+        }
+
+        console.log({
+          ticker,
+          name,
+          description,
+          imageUrl
+        })
+      }
+
       const count = tweets.length
 
       // Adjust timeout based on response size
